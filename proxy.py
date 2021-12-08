@@ -5,12 +5,14 @@ from bs4 import BeautifulSoup
 
 routes = web.RouteTableDef()
 
+TARGET_URL = os.environ.get("TARGET_URL")
+
 
 @routes.get("/")
 async def index(request):
     async with ClientSession() as session:
         res = await session.get(
-            "https://www.cronachemaceratesi.it/",
+            TARGET_URL,
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0"
             },
@@ -33,10 +35,10 @@ async def article(request):
     )
     async with ClientSession() as session:
         res = await session.get(
-            f"https://www.cronachemaceratesi.it/{year}/{month}/{day}/{slug}/{slugid}",
+            f"{TARGET_URL}/{year}/{month}/{day}/{slug}/{slugid}",
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
-                "Referer": "https://www.cronachemaceratesi.it",
+                "Referer": TARGET_URL,
             },
         )
 
@@ -45,23 +47,52 @@ async def article(request):
     return web.Response(text=str(mainbody), content_type="text/html")
 
 
+@routes.get("/wp-content/{asset:.*}")
+async def wp_assets(request):
+    asset = request.match_info["asset"]
+    async with ClientSession() as session:
+        res = await session.get(
+            f"{TARGET_URL}/wp-content/{asset}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
+                "Referer": "https://www.cronachemaceratesi.it",
+            },
+        )
+        body = await res.read()
+        content_type = res.content_type
+    return web.Response(body=body, content_type=content_type)
+
+
 def rebuildpage(document, **kwargs):
     newdoc = BeautifulSoup("<html><head></head><body></body></html>")
 
     mainbody = document.find(**kwargs)
+
     for link in mainbody.find_all("a"):
         href = link.get("href")
-        if href.startswith("https://www.cronachemaceratesi.it/"):
-            link["href"] = href.replace("https://www.cronachemaceratesi.it/", "/")
+        if href.startswith(TARGET_URL):
+            link["href"] = href.replace(TARGET_URL, "")
+
+    for img in mainbody.find_all("img"):
+        src = img.get("src")
+        if src.startswith(TARGET_URL):
+            img["src"] = src.replace(TARGET_URL, "")
+
     for banner in mainbody.find_all(class_="banner"):
         banner.extract()
     for script in mainbody.find_all("script"):
         script.extract()
     head = document.html.head
+
     for style in head.find_all("link"):
         newdoc.html.head.append(style)
+
     for style in head.find_all("style"):
+        href = style.get("href")
+        if href and href.startswith(TARGET_URL):
+            style["href"] = href.replace(TARGET_URL, "/")
         newdoc.html.head.append(style)
+
     newdoc.html.body.insert(1, mainbody)
     return newdoc
 
