@@ -1,7 +1,8 @@
 import os
+import copy
 from io import StringIO
 from aiohttp import web, ClientSession
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag, NavigableString
 import cssutils
 
 routes = web.RouteTableDef()
@@ -105,11 +106,59 @@ async def robots(request):
 
 
 def rebuildpage(document, **kwargs):
-    newdoc = BeautifulSoup("<html><head></head><body></body></html>", features="lxml")
+    newdoc = BeautifulSoup(
+        "<html><head></head><body></body></html>",
+        features="lxml",
+    )
 
     mainbody = document.find(**kwargs)
+    rewrite_urls(mainbody)
+    reconciliate_tree(newdoc.html.body, mainbody, document.find("body"))
 
-    for link in mainbody.find_all("a"):
+    for banner in mainbody.find_all(class_="banner"):
+        banner.extract()
+    for script in mainbody.find_all("script"):
+        script.extract()
+    head = document.html.head
+
+    for link in head.find_all("link"):
+        newdoc.html.head.append(link)
+    for style in head.find_all("style"):
+        newdoc.html.head.append(style)
+
+    rewrite_urls(newdoc.html.head)
+
+    return newdoc
+
+
+def clone(node):
+    if isinstance(node, NavigableString):
+        return type(node)(node)
+    new = Tag(None, node.builder, node.name, node.namespace, node.nsprefix)
+    new.attrs = dict(node.attrs)
+    for attr in ("can_be_empty_element", "hidden"):
+        setattr(new, attr, getattr(node, attr))
+    return new
+
+
+def reconciliate_tree(new, target, original):
+    if not isinstance(original, Tag):
+        return
+    if not isinstance(new, Tag):
+        return
+    for child in original.children:
+        if child == target:
+            new.append(child)
+            return
+        if child.name not in ["script", "iframe"]:
+            newchild = clone(child)
+            new.append(newchild)
+        reconciliate_tree(newchild, target, child)
+
+
+def rewrite_urls(tree):
+
+    for link in tree.find_all("a"):
         href = link.get("href")
         if href.startswith(TARGET_URL):
             link["href"] = href.replace(TARGET_URL, "")
@@ -119,7 +168,7 @@ def rebuildpage(document, **kwargs):
                 link["href"] = href.replace(cacheable, f"/__CACHE__/{cacheable}")
                 break
 
-    for img in mainbody.find_all("img"):
+    for img in tree.find_all("img"):
         src = img.get("src")
         if src.startswith(TARGET_URL):
             img["src"] = f"/__CACHE__/{src}"
@@ -133,15 +182,8 @@ def rebuildpage(document, **kwargs):
                 img["srcset"] = srcset.replace(cacheable, f"/__CACHE__/{cacheable}")
             img["srcset"] = srcset.replace(TARGET_URL, "")
 
-    for banner in mainbody.find_all(class_="banner"):
-        banner.extract()
-    for script in mainbody.find_all("script"):
-        script.extract()
-    head = document.html.head
-
-    for link in head.find_all("link"):
+    for link in tree.find_all("link"):
         href = link.get("href")
-        newdoc.html.head.append(link)
         if href.startswith(TARGET_URL):
             link["href"] = f"/__CACHE__/{href}"
             continue
@@ -149,12 +191,6 @@ def rebuildpage(document, **kwargs):
             if href.startswith(cacheable):
                 link["href"] = href.replace(cacheable, f"/__CACHE__/{cacheable}")
                 break
-
-    for style in head.find_all("style"):
-        newdoc.html.head.append(style)
-
-    newdoc.html.body.insert(1, mainbody)
-    return newdoc
 
 
 app = web.Application()
