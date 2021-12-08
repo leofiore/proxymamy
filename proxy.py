@@ -7,6 +7,7 @@ import cssutils
 routes = web.RouteTableDef()
 
 TARGET_URL = os.environ.get("TARGET_URL")
+CACHEABLE_URLS = os.environ.get("CACHEABLE_URLS", "").split(" ")
 
 
 @routes.get("/")
@@ -48,25 +49,21 @@ async def article(request):
     return web.Response(text=str(mainbody), content_type="text/html")
 
 
-@routes.get("/{cssdoc:.*.css}")
+@routes.get("/__CACHE__/{cssdoc:.*.css}")
 async def cssdocuments(request):
     cssdoc = request.match_info["cssdoc"]
     async with ClientSession() as session:
         res = await session.get(
-            f"{TARGET_URL}/{cssdoc}",
+            cssdoc,
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
                 "Referer": TARGET_URL,
             },
         )
-        sheet = cssutils.parseString(await res.text())
-    for rule in sheet:
-        if rule.type == rule.STYLE_RULE:
-            # find property
-            for property in rule.style:
-                if TARGET_URL in property.value:
-                    rule.style["property"] = property.value.replace(TARGET_URL, "")
-    return web.Response(body=sheet.cssText, content_type="text/css")
+        sheet = await res.text()
+    for cacheable in CACHEABLE_URLS + [TARGET_URL]:
+        sheet = sheet.replace(cacheable, f"/__CACHE__/{cacheable}")
+    return web.Response(body=sheet, content_type="text/css")
 
 
 @routes.get("/{wpsomething:wp-.*}/{asset:.*}")
@@ -76,6 +73,22 @@ async def wp_assets(request):
     async with ClientSession() as session:
         res = await session.get(
             f"{TARGET_URL}/{wp_path}/{asset}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
+                "Referer": TARGET_URL,
+            },
+        )
+        body = await res.read()
+        content_type = res.content_type
+    return web.Response(body=body, content_type=content_type)
+
+
+@routes.get("/__CACHE__/{remote:.*}")
+async def wp_assets(request):
+    remote = request.match_info["remote"]
+    async with ClientSession() as session:
+        res = await session.get(
+            remote,
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
                 "Referer": TARGET_URL,
@@ -100,14 +113,25 @@ def rebuildpage(document, **kwargs):
         href = link.get("href")
         if href.startswith(TARGET_URL):
             link["href"] = href.replace(TARGET_URL, "")
+            continue
+        for cacheable in CACHEABLE_URLS:
+            if href.startswith(cacheable):
+                link["href"] = href.replace(cacheable, f"/__CACHE__/{cacheable}")
+                break
 
     for img in mainbody.find_all("img"):
         src = img.get("src")
         if src.startswith(TARGET_URL):
-            img["src"] = src.replace(TARGET_URL, "")
-            srcset = img.get("srcset")
-            if srcset is not None:
-                img["srcset"] = srcset.replace(TARGET_URL, "")
+            img["src"] = f"/__CACHE__/{src}"
+        for cacheable in CACHEABLE_URLS:
+            if src.startswith(cacheable):
+                img["src"] = src.replace(cacheable, f"/__CACHE__/{cacheable}")
+        srcset = img.get("srcset")
+
+        if srcset is not None:
+            for cacheable in CACHEABLE_URLS:
+                img["srcset"] = srcset.replace(cacheable, f"/__CACHE__/{cacheable}")
+            img["srcset"] = srcset.replace(TARGET_URL, "")
 
     for banner in mainbody.find_all(class_="banner"):
         banner.extract()
@@ -115,13 +139,18 @@ def rebuildpage(document, **kwargs):
         script.extract()
     head = document.html.head
 
-    for style in head.find_all("link"):
-        newdoc.html.head.append(style)
+    for link in head.find_all("link"):
+        href = link.get("href")
+        newdoc.html.head.append(link)
+        if href.startswith(TARGET_URL):
+            link["href"] = f"/__CACHE__/{href}"
+            continue
+        for cacheable in CACHEABLE_URLS:
+            if href.startswith(cacheable):
+                link["href"] = href.replace(cacheable, f"/__CACHE__/{cacheable}")
+                break
 
     for style in head.find_all("style"):
-        href = style.get("href")
-        if href and href.startswith(TARGET_URL):
-            style["href"] = href.replace(TARGET_URL, "/")
         newdoc.html.head.append(style)
 
     newdoc.html.body.insert(1, mainbody)
