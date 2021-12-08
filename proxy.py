@@ -2,6 +2,7 @@ import os
 from io import StringIO
 from aiohttp import web, ClientSession
 from bs4 import BeautifulSoup
+import cssutils
 
 routes = web.RouteTableDef()
 
@@ -18,9 +19,8 @@ async def index(request):
             },
         )
 
-        document = BeautifulSoup(await res.text())
+        document = BeautifulSoup(await res.text(), features="lxml")
     mainbody = rebuildpage(document, id="primaryTopWrapper")
-    asyncio
 
     return web.Response(text=str(mainbody), content_type="text/html")
 
@@ -43,14 +43,30 @@ async def article(request):
             },
         )
 
-        document = BeautifulSoup(await res.text())
+        document = BeautifulSoup(await res.text(), features="lxml")
     mainbody = rebuildpage(document, id="contenuto_articolo")
     return web.Response(text=str(mainbody), content_type="text/html")
 
 
 @routes.get("/{cssdoc:.*.css}")
 async def cssdocuments(request):
-    ...
+    cssdoc = request.match_info["cssdoc"]
+    async with ClientSession() as session:
+        res = await session.get(
+            f"{TARGET_URL}/{cssdoc}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
+                "Referer": TARGET_URL,
+            },
+        )
+        sheet = cssutils.parseString(await res.text())
+    for rule in sheet:
+        if rule.type == rule.STYLE_RULE:
+            # find property
+            for property in rule.style:
+                if TARGET_URL in property.value:
+                    rule.style["property"] = property.value.replace(TARGET_URL, "")
+    return web.Response(body=sheet.cssText, content_type="text/css")
 
 
 @routes.get("/{wpsomething:wp-.*}/{asset:.*}")
@@ -76,7 +92,7 @@ async def robots(request):
 
 
 def rebuildpage(document, **kwargs):
-    newdoc = BeautifulSoup("<html><head></head><body></body></html>")
+    newdoc = BeautifulSoup("<html><head></head><body></body></html>", features="lxml")
 
     mainbody = document.find(**kwargs)
 
