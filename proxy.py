@@ -77,6 +77,9 @@ def rebuildpage(document, **kwargs):
         src = img.get("src")
         if src.startswith(TARGET_URL):
             img["src"] = src.replace(TARGET_URL, "")
+            srcset = img.get("srcset")
+            if srcset is not None:
+                img["srcset"] = srcset.replace(TARGET_URL, "")
 
     for banner in mainbody.find_all(class_="banner"):
         banner.extract()
