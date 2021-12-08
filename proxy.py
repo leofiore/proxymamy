@@ -1,3 +1,4 @@
+import os
 from io import StringIO
 from aiohttp import web, ClientSession
 from bs4 import BeautifulSoup
@@ -67,4 +68,4 @@ def rebuildpage(document, **kwargs):
 
 app = web.Application()
 app.add_routes(routes)
-web.run_app(app)
+web.run_app(app, port=int(os.environ.get("PORT", 8080)))
