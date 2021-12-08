@@ -20,6 +20,7 @@ async def index(request):
 
         document = BeautifulSoup(await res.text())
     mainbody = rebuildpage(document, id="primaryTopWrapper")
+    asyncio
 
     return web.Response(text=str(mainbody), content_type="text/html")
 
@@ -47,10 +48,15 @@ async def article(request):
     return web.Response(text=str(mainbody), content_type="text/html")
 
 
+@routes.get("/{cssdoc:.*.css}")
+async def cssdocuments(request):
+    ...
+
+
 @routes.get("/{wpsomething:wp-.*}/{asset:.*}")
 async def wp_assets(request):
     asset = request.match_info["asset"]
-    wp_path =request.match_info["wpsomething"]
+    wp_path = request.match_info["wpsomething"]
     async with ClientSession() as session:
         res = await session.get(
             f"{TARGET_URL}/{wp_path}/{asset}",
@@ -62,6 +68,11 @@ async def wp_assets(request):
         body = await res.read()
         content_type = res.content_type
     return web.Response(body=body, content_type=content_type)
+
+
+@routes.get("/robots.txt")
+async def robots(request):
+    return web.Response(text="User-agent:*\nDisallow: /")
 
 
 def rebuildpage(document, **kwargs):
