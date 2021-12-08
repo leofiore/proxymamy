@@ -3,7 +3,6 @@ import copy
 from io import StringIO
 from aiohttp import web, ClientSession
 from bs4 import BeautifulSoup, Tag, NavigableString
-import cssutils
 
 routes = web.RouteTableDef()
 
