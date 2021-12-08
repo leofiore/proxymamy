@@ -47,15 +47,16 @@ async def article(request):
     return web.Response(text=str(mainbody), content_type="text/html")
 
 
-@routes.get("/wp-content/{asset:.*}")
+@routes.get("/{wpsomething:wp-.*}/{asset:.*}")
 async def wp_assets(request):
     asset = request.match_info["asset"]
+    wp_path =request.match_info["wpsomething"]
     async with ClientSession() as session:
         res = await session.get(
-            f"{TARGET_URL}/wp-content/{asset}",
+            f"{TARGET_URL}/{wp_path}/{asset}",
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0",
-                "Referer": "https://www.cronachemaceratesi.it",
+                "Referer": TARGET_URL,
             },
         )
         body = await res.read()
