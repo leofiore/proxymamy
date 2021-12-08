@@ -1,8 +1,10 @@
 import os
-import copy
-from io import StringIO
+import asyncio
 from aiohttp import web, ClientSession
 from bs4 import BeautifulSoup, Tag, NavigableString
+import soupsieve as sv
+import re
+from threading import Thread
 
 routes = web.RouteTableDef()
 
@@ -114,10 +116,24 @@ def rebuildpage(document, **kwargs):
     rewrite_urls(mainbody)
     reconciliate_tree(newdoc.html.body, mainbody, document.find("body"))
 
-    for banner in mainbody.find_all(class_="banner"):
-        banner.extract()
-    for script in mainbody.find_all("script"):
-        script.extract()
+    removable = []
+
+    def finder(selector):
+        for node in selector.select(newdoc.html.body):
+            removable.append(node)
+
+    finders = []
+    for sel in cosmeticfilters:
+        finders.append(Thread(target=finder, args=(sel,)))
+        finders[-1].start()
+    while len(finders) > 0:
+        finders[0].join()
+        finders.pop(0)
+
+    # for script in mainbody.find_all("script"):
+    #    script.decompose()
+    for r in removable:
+        r.decompose()
     head = document.html.head
 
     for link in head.find_all("link"):
@@ -191,6 +207,53 @@ def rewrite_urls(tree):
                 link["href"] = href.replace(cacheable, f"/__CACHE__/{cacheable}")
                 break
 
+
+# filter_regex = re.compile(r"^(\*?##)(.+)")
+filter_regex = re.compile(r"([^#]*)##(.+)")
+style_regex = re.compile(r":(style|has-text|matches-path)\([^()]*\)")
+cosmeticfilters = []
+
+
+async def loadfilters(f):
+    async with ClientSession() as session:
+        res = await session.get(
+            f,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0"
+            },
+        )
+        for rule in (await res.text()).split("\n"):
+            if filter_regex.match(rule) is None:
+                continue
+            host, ruledef = filter_regex.match(rule).groups()
+            if style_regex.match(ruledef):
+                continue
+            if host not in ("*", ""):
+                inhost = False
+                for h in host.split(","):
+                    if h in TARGET_URL:
+                        inhost = True
+                        break
+                if not inhost:
+                    continue
+            cosmeticfilters.append(sv.compile(ruledef))
+
+
+async def init():
+    await asyncio.gather(
+        *[
+            loadfilters(f)
+            for f in (
+                # "https://combinatronics.io/uBlockOrigin/uAssets/master/filters/filters.txt",
+                "https://easylist-downloads.adblockplus.org/easylistitaly.txt",
+            )
+        ]
+    )
+    cosmeticfilters.insert(0, sv.compile("script"))
+
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(init())
 
 app = web.Application()
 app.add_routes(routes)
