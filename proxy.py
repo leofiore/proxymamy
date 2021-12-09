@@ -113,25 +113,29 @@ def rebuildpage(document, **kwargs):
     )
 
     mainbody = document.find(**kwargs)
-    rewrite_urls(mainbody)
+    rewrite_urls(document.find("body"))
     reconciliate_tree(newdoc.html.body, mainbody, document.find("body"))
 
     removable = []
 
     def finder(selector):
+        found = False
         for node in selector.select(newdoc.html.body):
+            found = True
             removable.append(node)
+        if not found:
+            cosmetic_unuseful.append(selector)
+            cosmeticfilters.remove(selector)
 
     finders = []
     for sel in cosmeticfilters:
         finders.append(Thread(target=finder, args=(sel,)))
         finders[-1].start()
+
     while len(finders) > 0:
         finders[0].join()
         finders.pop(0)
 
-    # for script in mainbody.find_all("script"):
-    #    script.decompose()
     for r in removable:
         r.decompose()
     head = document.html.head
@@ -165,9 +169,8 @@ def reconciliate_tree(new, target, original):
         if child == target:
             new.append(child)
             return
-        if child.name not in ["script", "iframe"]:
-            newchild = clone(child)
-            new.append(newchild)
+        newchild = clone(child)
+        new.append(newchild)
         reconciliate_tree(newchild, target, child)
 
 
@@ -175,11 +178,11 @@ def rewrite_urls(tree):
 
     for link in tree.find_all("a"):
         href = link.get("href")
-        if href.startswith(TARGET_URL):
+        if href and href.startswith(TARGET_URL):
             link["href"] = href.replace(TARGET_URL, "")
             continue
         for cacheable in CACHEABLE_URLS:
-            if href.startswith(cacheable):
+            if href and href.startswith(cacheable):
                 link["href"] = href.replace(cacheable, f"/__CACHE__/{cacheable}")
                 break
 
@@ -212,6 +215,7 @@ def rewrite_urls(tree):
 filter_regex = re.compile(r"([^#]*)##(.+)")
 style_regex = re.compile(r":(style|has-text|matches-path)\([^()]*\)")
 cosmeticfilters = []
+cosmetic_unuseful = []
 
 
 async def loadfilters(f):
